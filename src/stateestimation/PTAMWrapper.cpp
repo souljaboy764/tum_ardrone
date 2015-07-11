@@ -867,6 +867,8 @@ TooN::Vector<3> PTAMWrapper::evalNavQue(unsigned int from, unsigned int to, bool
 void PTAMWrapper::newNavdata(ardrone_autonomy::Navdata* nav)
 {
 	lastNavinfoReceived = *nav;
+	if(mpTracker!=0)
+		mpTracker->lastNavinfoReceived = *nav;
 
 	if(getMS(lastNavinfoReceived.header.stamp) > 2000000)
 	{

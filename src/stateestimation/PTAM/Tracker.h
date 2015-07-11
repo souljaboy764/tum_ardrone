@@ -26,6 +26,7 @@
 #include "MiniPatch.h"
 #include "Relocaliser.h"
 #include "../Predictor.h"
+#include "ardrone_autonomy/Navdata.h"
 
 #include <sstream>
 #include <vector>
@@ -62,6 +63,8 @@ public:
   enum {I_FIRST, I_SECOND, I_FAILED ,T_GOOD, T_DODGY, T_LOST, T_RECOVERED_GOOD, T_RECOVERED_DODGY, NOT_TRACKING, INITIALIZING, T_TOOK_KF} lastStepResult;
 
   // kf takking parameters (settable via ros dyn. reconfigure)
+  double firstKFaltd,secondKFaltd;
+  ardrone_autonomy::Navdata lastNavinfoReceived;
   double minKFTimeDist;
 
 

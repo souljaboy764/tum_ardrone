@@ -200,8 +200,10 @@ bool MapMaker::InitFromStereo(KeyFrame &kF,
 			      vector<pair<ImageRef, ImageRef> > &vTrailMatches,
 			      SE3<> &se3TrackerPose,
 				  SE3<> KFZeroDesiredCamFromWorld,
-				  SE3<> KFOneDesiredCamFromWorld)
+				  SE3<> KFOneDesiredCamFromWorld,
+          double KFdistance)
 {
+  GV3::Register(mgvdWiggleScale, "MapMaker.WiggleScale", KFdistance, SILENT);
   mdWiggleScale = *mgvdWiggleScale; // Cache this for the new map.
 
   mCamera.SetImageSize(kF.aLevels[0].im.size());

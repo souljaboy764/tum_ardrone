@@ -17,6 +17,7 @@
 
 #include <fstream>
 #include <fcntl.h>
+#include <math.h>
 
 #include "settingsCustom.h"
 
@@ -379,6 +380,7 @@ void Tracker::TrackForInitialMap()
     {
 		if(mbUserPressedSpacebar)  // First spacebar = this is the first keyframe
 		{
+			firstKFaltd = lastNavinfoReceived.altd;
 			mbUserPressedSpacebar = false;
 			TrailTracking_Start();
 			mnInitialStage = TRAIL_TRACKING_STARTED;
@@ -412,7 +414,8 @@ void Tracker::TrackForInitialMap()
 			for(list<Trail>::iterator i = mlTrails.begin(); i!=mlTrails.end(); i++)
 				vMatches.push_back(pair<ImageRef, ImageRef>(i->irInitialPos,
 							i->irCurrentPos));
-			bool succ = mMapMaker.InitFromStereo(mFirstKF, mCurrentKF, vMatches, mse3CamFromWorld, KFZeroDesiredCamFromWorld, predictedCFromW);  // This will take some time!
+			secondKFaltd = lastNavinfoReceived.altd;
+			bool succ = mMapMaker.InitFromStereo(mFirstKF, mCurrentKF, vMatches, mse3CamFromWorld, KFZeroDesiredCamFromWorld, predictedCFromW,fabs(firstKFaltd - secondKFaltd));  // This will take some time!
 			if(succ)
 				lastStepResult = I_SECOND;
 			else

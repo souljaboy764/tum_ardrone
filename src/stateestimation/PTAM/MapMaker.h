@@ -46,7 +46,8 @@ public:
 		      std::vector<std::pair<CVD::ImageRef, CVD::ImageRef> > &vMatches,
 		      SE3<> &se3CameraPos,
 			  SE3<> KFZeroDesiredCamFromWorld,
-			  SE3<> KFOneDesiredCamFromWorld);
+			  SE3<> KFOneDesiredCamFromWorld,
+        double KFdistance);
 
   bool InitFromStereo_OLD(KeyFrame &kFirst, KeyFrame &kSecond,  // EXPERIMENTAL HACK
 		      std::vector<std::pair<CVD::ImageRef, CVD::ImageRef> > &vMatches,

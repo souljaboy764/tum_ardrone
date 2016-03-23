@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 dependencies/TooN/build/
 dependencies/TooN/html/
 dependencies/gvars3/build/
@@ -31,3 +32,26 @@ ptam/thirdparty/libcvd/sources/
 /build
 /Debug
 *~
+=======
+bin/
+build/
+msg_gen/
+srv_gen/
+src/tum_ardrone/
+docs/
+cfg/cpp/
+cfg/*.cfgc
+thirdparty/gvars3/build/
+thirdparty/gvars3/include/
+thirdparty/gvars3/lib/
+thirdparty/gvars3/gvars_built
+thirdparty/libcvd/build/
+thirdparty/libcvd/include/
+thirdparty/libcvd/installfiles/
+thirdparty/libcvd/lib/
+thirdparty/libcvd/libcvd_built
+
+
+
+
+>>>>>>> b173b58858fa9c0b3afe49511d3614e1a3108e42

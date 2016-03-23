@@ -44,6 +44,7 @@ public:
   AxesArray(){ID=0;};
   void init(double lifetime);	// shall we add here some init arguments?
   bool addAxes(const double pos[3], const double att[4],unsigned int id);
+  visualization_msgs::Marker getAxes(const double pos[3], const double att[4],unsigned int id);
   void clearAxes() {cubes.markers.clear();};
   visualization_msgs::MarkerArray getAxes(){return cubes;};
   TooN::Vector<3> getCenter(const double pos[3], const double att[4]);
@@ -113,7 +114,43 @@ bool AxesArray::addAxes(const double pos[3], const double att[4], unsigned int i
 
   return true;
 }
+/*
+visualization_msgs::Marker AxesArray::getAxes(const double pos[3], const double att[4], unsigned int id)
+{
+  TooN::Vector<3,double> axesCenter = getCenter(pos, att);
 
+  visualization_msgs::Marker newCube;
+   // set cube attitude
+  newCube.pose.orientation.w=att[0];
+  newCube.pose.orientation.x=-att[1];
+  newCube.pose.orientation.y=-att[2];
+  newCube.pose.orientation.z=-att[3];
+  //  memcpy(&(newCube.pose.orientation.x),&(att[1]),sizeof(double)*3);
+
+  // add x-axis
+  newCube.id = 10*id;
+  buffvec=center+rot.inverse()*TooN::makeVector(AX_DIST/2,0.0,0.0);
+  memcpy(&(newCube.pose.position.x),&(buffvec[0]),sizeof(double)*3);
+  memcpy(&(newCube.scale.x),dirx,sizeof(double)*3);
+  memcpy(&(newCube.color.r),red,sizeof(float)*4);
+  cubes.markers.push_back(newCube);
+
+  // add y-axis, keep orientation
+  newCube.id = 10*id+1;
+  buffvec=center+rot.inverse()*TooN::makeVector(0.0, AX_DIST/2,0.0);
+  memcpy(&(newCube.pose.position.x),&(buffvec[0]),sizeof(double)*3);
+  memcpy(&(newCube.scale.x),diry,sizeof(double)*3);
+  memcpy(&(newCube.color.r),green,sizeof(float)*4);
+  cubes.markers.push_back(newCube);
+
+  // add z-axis, keep orientation
+  newCube.id = 10*id+2;
+  buffvec=center+rot.inverse()*TooN::makeVector(0.0,0.0,AX_DIST/2);
+  memcpy(&(newCube.pose.position.x),&(buffvec[0]),sizeof(double)*3);
+  memcpy(&(newCube.scale.x),dirz,sizeof(double)*3);
+  memcpy(&(newCube.color.r),blue,sizeof(float)*4);
+}
+*/
 TooN::Matrix<3,3> AxesArray::quaternion2matrix(const double q[4])
 {
   // stolen from Eigen3 and adapted to TooN

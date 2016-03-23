@@ -21,6 +21,7 @@ find_package(catkin REQUIRED COMPONENTS
 )
 
 find_package(OpenCV REQUIRED)
+find_package(PCL REQUIRED)
 
 generate_dynamic_reconfigure_options(cfg/PTAMVisualizerParams.cfg cfg/PtamParams.cfg)
 
@@ -96,12 +97,16 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/thirdparty/gvars3/include 
   ${PROJECT_SOURCE_DIR}/thirdparty/agast/include
   ${catkin_INCLUDE_DIRS}
-)  
+  ${OpenCV_INCLUDE_DIRS} 
+  ${PCL_INCLUDE_DIRS}
+  )
+
 
 link_directories(
   ${PROJECT_SOURCE_DIR}/thirdparty/libcvd/lib 
   ${PROJECT_SOURCE_DIR}/thirdparty/gvars3/lib 
   ${PROJECT_SOURCE_DIR}/thirdparty/agast/lib
+  ${PCL_LIBRARY_DIRS}
 )
 
 set(PTAM_LIBRARIES GL glut cvd GVars3_headless agast blas lapack)
@@ -119,7 +124,7 @@ IF(CMAKE_BUILD_TYPE MATCHES Release)
 ENDIF(CMAKE_BUILD_TYPE MATCHES Release)
 add_dependencies(ptam DEPS ${${PROJECT_NAME}_EXPORTED_TARGETS}})
 
-target_link_libraries(ptam ${PTAM_LIBRARIES} ${OpenCV_LIBS} ${catkin_LIBRARIES})
+target_link_libraries(ptam ${PTAM_LIBRARIES} ${OpenCV_LIBS} ${catkin_LIBRARIES} ${PCL_LIBRARIES})
 
 
 # Camera calibrator 
@@ -142,9 +147,9 @@ if (PKG_CONFIG_FOUND AND UNIX AND NOT APPLE)
    endif(GTK_FOUND)
 endif(PKG_CONFIG_FOUND AND UNIX AND NOT APPLE)
 
-add_executable(remote_ptam src/RemotePtam.cpp)
-add_dependencies(remote_ptam DEPS ${${PROJECT_NAME}_EXPORTED_TARGETS}})
-target_link_libraries(remote_ptam ${GTK_LIBRARIES} ${OpenCV_LIBS} ${catkin_LIBRARIES})
+#add_executable(remote_ptam src/RemotePtam.cpp)
+#add_dependencies(remote_ptam DEPS ${${PROJECT_NAME}_EXPORTED_TARGETS}})
+#target_link_libraries(remote_ptam ${GTK_LIBRARIES} ${OpenCV_LIBS} ${OpenCV_LIBRARIES} ${catkin_LIBRARIES})
 
 add_executable(ptam_visualizer src/PTAMVisualizer.cpp)
 add_dependencies(ptam_visualizer DEPS ${${PROJECT_NAME}_EXPORTED_TARGETS}})

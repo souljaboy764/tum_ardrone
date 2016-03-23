@@ -63,6 +63,22 @@ struct TrackerData
     bInImage = true;
   }
 
+  inline bool visibleFrom(const SE3<> &pos, ATANCamera &Cam)
+  {
+    Vector<3> vCam = pos * Point->v3WorldPos;
+    if(vCam[2] < 0.001)
+      return false;
+    Vector<2> vImPlane = project(vCam);
+    if(vImPlane*vImPlane > Cam.LargestRadiusInImage() * Cam.LargestRadiusInImage())
+      return false;
+    Vector<2> vImage = Cam.Project(vImPlane);
+    if(Cam.Invalid())
+      return false;
+
+    if(vImage[0] < 0 || vImage[1] < 0 || vImage[0] > irImageSize[0] || vImage[1] > irImageSize[1])
+      return false;
+    return true;
+  }
   // Get the projection derivatives (depend only on the camera.)
   // This is called Unsafe because it depends on the camera caching 
   // results from the previous projection:

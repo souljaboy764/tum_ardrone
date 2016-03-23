@@ -20,9 +20,16 @@
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <ptam_com/PointCloud.h>
+#include <ptam_com/PosePointCloud.h>
 #include <ptam_com/KeyFrame_srv.h>
 #include <std_msgs/String.h>
+#include <visualization_msgs/Marker.h>
+#include <nav_msgs/Odometry.h>
+#include <pcl_ros/point_cloud.h>
+#include <pcl/point_types.h>
+
 #include <queue>
 
 #include "GLWindow2.h"
@@ -57,6 +64,7 @@ private:
   ros::Subscriber sub_imu_;
   ros::Subscriber sub_calibration_;
   ros::Subscriber sub_kb_input_;
+  ros::Subscriber sub_odom_;
   tf::TransformBroadcaster tf_pub_;
   tf::TransformListener tf_sub_;
   image_transport::Subscriber sub_image_;
@@ -64,18 +72,24 @@ private:
   ros::Publisher pub_pose_;             // world in the camera frame
   ros::Publisher pub_pose_world_;       // camera in the world frame
   ros::Publisher pub_info_;
+  ros::Publisher pub_visibleCloud_;
+  ros::Publisher pub_odom_;
   ros::ServiceServer srvPC_;
   ros::ServiceServer srvKF_;
+  ros::ServiceServer srvPosePC_;
+
 
   ros::CallbackQueue image_queue_;
 
   ImuQueue imu_msgs_;
+  geometry_msgs::PoseWithCovarianceStampedPtr prev_nav_msg;
 
   bool first_frame_;
 
   GLWindow2 *mGLWindow;
   MapViewer *mpMapViewer;
-
+  
+  static pthread_mutex_t odom_mutex;
   CVD::Image<CVD::byte > img_bw_;
   CVD::Image<CVD::Rgb<CVD::byte> > img_rgb_;
 
@@ -92,10 +106,13 @@ private:
   void publishPreviewImage(CVD::Image<CVD::byte> & img, const std_msgs::Header & header);
   bool pointcloudservice(ptam_com::PointCloudRequest & req, ptam_com::PointCloudResponse & resp);
   bool keyframesservice(ptam_com::KeyFrame_srvRequest & req, ptam_com::KeyFrame_srvResponse & resp);
+  bool posepointcloudservice(ptam_com::PosePointCloudRequest & req, ptam_com::PosePointCloudResponse & resp); 
 
   void imageCallback(const sensor_msgs::ImageConstPtr & img);
   void imuCallback(const sensor_msgs::ImuConstPtr & msg);
   void keyboardCallback(const std_msgs::StringConstPtr & kb_input);
+  void randPoseCallback(const geometry_msgs::PoseStampedPtr & pose);
+  void odomCallback(const nav_msgs::OdometryPtr &odomPtr);
 
   bool transformQuaternion(const std::string & target_frame, const std_msgs::Header & header, const geometry_msgs::Quaternion & q_in, TooN::SO3<double> & r_out);
   bool transformPoint(const std::string & target_frame, const std_msgs::Header & header, const geometry_msgs::Point & t_in, TooN::Vector<3> & t_out);
@@ -103,7 +120,7 @@ private:
 
   /// finds object in queue with timestamp closest to timestamp. Requires that T has a std_msgs::header field named "header"
   template<class T> bool findClosest(const ros::Time & timestamp, std::queue<T> & queue, T * obj, const double & max_delay = 0.01);
-
+  pcl::PointCloud<pcl::PointXYZ>::Ptr getVisiblePointsFromPose(TooN::SE3<double> pose);
   static void GUICommandCallBack(void* ptr, std::string sCommand, std::string sParams);
 
 };

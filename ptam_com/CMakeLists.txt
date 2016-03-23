@@ -28,6 +28,7 @@ add_service_files(DIRECTORY srv
 	FILES
 	KeyFrame_srv.srv
 	PointCloud.srv
+	PosePointCloud.srv
 )
 
 #And now generate the messages

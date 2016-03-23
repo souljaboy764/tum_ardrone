@@ -6,19 +6,33 @@
 #include "ptam/ATANCamera.h"
 #include "ptam/MapMaker.h"
 #include "ptam/Tracker.h"
+#include "ptam/TrackerData.h"
 //#include "ptam/ARDriver.h"
 #include "ptam/MapViewer.h"
 #include "ptam/LevelHelpers.h"
 #include "ptam/MapPoint.h"
-
+#include "ptam/Params.h"
+#include "ptam/KeyFrame.h"
 #include <ptam_com/ptam_info.h>
 #include <opencv/cv.h>
 #include <cvd/vision.h>
+#include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <nav_msgs/Odometry.h>
 
+#include <pcl_ros/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/PCLPointCloud2.h>
+#include <pcl/conversions.h>
+#include <pcl_ros/transforms.h>
+
+#include <cmath>
 using namespace CVD;
 using namespace std;
 using namespace GVars3;
 
+pthread_mutex_t System::odom_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 System::System() :
       nh_("vslam"), image_nh_(""), first_frame_(true), mpMap(NULL)
@@ -27,13 +41,18 @@ System::System() :
   pub_pose_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped> ("pose", 1);
   pub_pose_world_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped> ("pose_world", 1);
   pub_info_ = nh_.advertise<ptam_com::ptam_info> ("info", 1);
+  pub_visibleCloud_ = nh_.advertise<pcl::PointCloud<pcl::PointXYZ> > ("frame_points", 1);
+  
+  pub_odom_ = nh_.advertise<nav_msgs::Odometry> ("odom", 1);
   srvPC_ = nh_.advertiseService("pointcloud", &System::pointcloudservice,this);
   srvKF_ = nh_.advertiseService("keyframes", &System::keyframesservice,this);
+  srvPosePC_ = nh_.advertiseService("posepointcloud", &System::posepointcloudservice,this);
 
-  sub_imu_ = nh_.subscribe("imu", 100, &System::imuCallback, this);
+  sub_imu_ = nh_.subscribe("/mobile_base/sensors/imu_data", 100, &System::imuCallback, this);
   sub_kb_input_ = nh_.subscribe("key_pressed", 100, &System::keyboardCallback, this);
-
+  
   image_nh_.setCallbackQueue(&image_queue_);
+
   // get topic to subscribe to:
   std::string topic = image_nh_.resolveName("image");
   if (topic == "/image")
@@ -41,7 +60,6 @@ System::System() :
     ROS_WARN("video source: image has not been remapped! Typical command-line usage:\n"
         "\t$ ./ptam image:=<image topic>");
   }
-
   image_transport::ImageTransport it(image_nh_);
   sub_image_ = it.subscribe(topic, 1, &System::imageCallback, this, image_transport::TransportHints("raw", ros::TransportHints().tcpNoDelay(true)));
   pub_preview_image_ = it.advertise("vslam/preview", 1);
@@ -54,11 +72,11 @@ void System::init(const CVD::ImageRef & size)
   img_rgb_.resize(size);
 
   mpCamera = new ATANCamera("Camera");
-
+  
   mpMap = new Map;
   mpMapMaker = new MapMaker(*mpMap, *mpCamera, nh_);
   mpTracker = new Tracker(size, *mpCamera, *mpMap, *mpMapMaker);
-
+  sub_odom_ = nh_.subscribe("/odom", 100, &System::odomCallback, this);
   GUI.RegisterCommand("exit", GUICommandCallBack, this);
   GUI.RegisterCommand("quit", GUICommandCallBack, this);
 
@@ -73,6 +91,7 @@ void System::init(const CVD::ImageRef & size)
     GUI.ParseLine("DrawMap=0");
     GUI.ParseLine("Menu.AddMenuToggle Root \"View Map\" DrawMap Root");
   }
+  
 }
 
 
@@ -92,7 +111,7 @@ void System::imageCallback(const sensor_msgs::ImageConstPtr & img)
   //	static ros::Time t = img->header.stamp;
 
 
-  ROS_ASSERT(img->encoding == sensor_msgs::image_encodings::MONO8 && img->step == img->width);
+  //ROS_ASSERT(img->encoding == sensor_msgs::image_encodings::MONO8 && img->step == img->width);
 
   const VarParams& varParams = PtamParameters::varparams();
 
@@ -121,16 +140,19 @@ void System::imageCallback(const sensor_msgs::ImageConstPtr & img)
 
 //  -------------------
   // TODO: avoid copy, by calling TrackFrame, with the ros image, because there is another copy inside TrackFrame
-  CVD::BasicImage<CVD::byte> img_tmp((CVD::byte *)&img->data[0], CVD::ImageRef(img->width, img->height));
+  cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::MONO8);
+  memcpy(img_bw_.data(),cv_ptr->image.data,img->width * img->height);
+  /*CVD::BasicImage<CVD::byte> img_tmp((CVD::byte *)&img->data[0], CVD::ImageRef(img->width, img->height));
   CVD::copy(img_tmp, img_bw_);
-
+*/
   bool tracker_draw = false;
 
   static gvar3<int> gvnDrawMap("DrawMap", 0, HIDDEN | SILENT);
   bool bDrawMap = mpMap->IsGood() && *gvnDrawMap;
 
   if(PtamParameters::fixparams().gui){
-    CVD::copy(img_tmp, img_rgb_);
+    //CVD::copy(img_tmp, img_rgb_);
+    memcpy(img_rgb_.data(),cv_ptr->image.data,img->width * img->height);
 
     mGLWindow->SetupViewport();
     mGLWindow->SetupVideoOrtho();
@@ -184,6 +206,15 @@ void System::imuCallback(const sensor_msgs::ImuConstPtr & msg)
     imu_msgs_.pop();
 }
 
+void System::odomCallback(const nav_msgs::OdometryPtr &odomPtr)
+{
+  pthread_mutex_lock(&odom_mutex);
+  if(mpTracker!=NULL)
+    mpTracker->odometry = *odomPtr;
+
+  pthread_mutex_unlock(&odom_mutex);
+}
+
 template<class T>
 bool System::findClosest(const ros::Time & timestamp, std::queue<T> & queue, T * obj, const double & max_delay)
 {
@@ -216,7 +247,6 @@ bool System::findClosest(const ros::Time & timestamp, std::queue<T> & queue, T *
     return true;
   };
 }
-
 
 void System::keyboardCallback(const std_msgs::StringConstPtr & kb_input){
   mpTracker->command(kb_input->data);
@@ -264,6 +294,20 @@ bool System::transformPoint(const std::string & target_frame, const std_msgs::He
   return true;
 }
 
+vector<float> Q2RPY(int w, int x, int y, int z)
+{
+  vector<float> res;
+  res.push_back(atan2(
+        2*(w*x + z*y),
+        1-2*(x*x + y*y)));
+  res.push_back(asin(2*(w*y-z*x)));
+  res.push_back(atan2(
+        2*(w*z + x*y),
+        1-2*(z*z + y*y)));
+  return res;
+
+}
+
 void System::publishPoseAndInfo(const std_msgs::Header & header)
 {
   
@@ -285,6 +329,7 @@ void System::publishPoseAndInfo(const std_msgs::Header & header)
     ROS_WARN_STREAM("scale ("<<scale<<") <= 0, set to 1");
     scale = 1;
   }
+  
 
   if (mpTracker->getTrackingQuality() && mpMap->IsGood())
   {
@@ -292,7 +337,8 @@ void System::publishPoseAndInfo(const std_msgs::Header & header)
     //world in the camera frame
     TooN::Matrix<3, 3, double> r_ptam = pose.get_rotation().get_matrix();
     TooN::Vector<3, double> t_ptam =  pose.get_translation();
-
+    tf::Matrix3x3 m(r_ptam(0, 0), r_ptam(0, 1), r_ptam(0, 2), r_ptam(1, 0), r_ptam(1, 1), r_ptam(1, 2), r_ptam(2, 0), r_ptam(2, 1), r_ptam(2, 2));
+     
     tf::StampedTransform transform_ptam(tf::Transform(tf::Matrix3x3(r_ptam(0, 0), r_ptam(0, 1), r_ptam(0, 2), r_ptam(1, 0), r_ptam(1, 1), r_ptam(1, 2), r_ptam(2, 0), r_ptam(2, 1), r_ptam(2, 2))
     , tf::Vector3(t_ptam[0] / scale, t_ptam[1] / scale, t_ptam[2] / scale)), header.stamp, frame_id, PtamParameters::fixparams().parent_frame);
 
@@ -302,13 +348,13 @@ void System::publishPoseAndInfo(const std_msgs::Header & header)
 
     tf::StampedTransform transform_world(tf::Transform(tf::Matrix3x3(r_world(0, 0), r_world(0, 1), r_world(0, 2), r_world(1, 0), r_world(1, 1), r_world(1, 2), r_world(2, 0), r_world(2, 1), r_world(2, 2))
         , tf::Vector3(t_world[0] / scale, t_world[1] / scale, t_world[2] / scale)), header.stamp, PtamParameters::fixparams().parent_frame, frame_id);
-
+    
     tf_pub_.sendTransform(transform_world);
-
     if (pub_pose_.getNumSubscribers() > 0 || pub_pose_world_.getNumSubscribers() > 0)
     {
       //world in the camera frame
       geometry_msgs::PoseWithCovarianceStampedPtr msg_pose(new geometry_msgs::PoseWithCovarianceStamped);
+      nav_msgs::OdometryPtr msg_odom(new nav_msgs::Odometry);
       const tf::Quaternion & q_tf_ptam = transform_ptam.getRotation();
       const tf::Vector3 & t_tf_ptam = transform_ptam.getOrigin();
       msg_pose->pose.pose.orientation.w = q_tf_ptam.w();
@@ -325,6 +371,7 @@ void System::publishPoseAndInfo(const std_msgs::Header & header)
 
       msg_pose->header = header;
       pub_pose_.publish(msg_pose);
+              
 
 
       //camera in the world frame
@@ -349,9 +396,36 @@ void System::publishPoseAndInfo(const std_msgs::Header & header)
 
       pub_pose_world_.publish(msg_pose);
 
+      if(prev_nav_msg)
+      {
+        msg_odom->header = header;
+        msg_odom->pose = msg_pose->pose;
+        msg_odom->child_frame_id = "camera_depth_optical_frame";
+        prev_nav_msg->header.stamp.sec;
+        float time_diff = msg_pose->header.stamp.sec - prev_nav_msg->header.stamp.sec + (msg_pose->header.stamp.nsec - prev_nav_msg->header.stamp.nsec)*1e-9;
+        msg_odom->twist.twist.linear.x = (msg_pose->pose.pose.position.x - prev_nav_msg->pose.pose.position.x)/time_diff;
+        msg_odom->twist.twist.linear.y = (msg_pose->pose.pose.position.y - prev_nav_msg->pose.pose.position.y)/time_diff;
+        msg_odom->twist.twist.linear.z = (msg_pose->pose.pose.position.z - prev_nav_msg->pose.pose.position.z)/time_diff;
+
+        vector<float> rpy_new = Q2RPY(msg_pose->pose.pose.orientation.w, msg_pose->pose.pose.orientation.x, msg_pose->pose.pose.orientation.y, msg_pose->pose.pose.orientation.z);
+        vector<float> rpy_old = Q2RPY(prev_nav_msg->pose.pose.orientation.w, prev_nav_msg->pose.pose.orientation.x, prev_nav_msg->pose.pose.orientation.y, prev_nav_msg->pose.pose.orientation.z);
+
+
+        msg_odom->twist.twist.angular.x = (rpy_new[0] - rpy_old[0])/time_diff;
+        msg_odom->twist.twist.angular.y = (rpy_new[1] - rpy_old[1])/time_diff;
+        msg_odom->twist.twist.angular.z = (rpy_new[2] - rpy_old[2])/time_diff;
+        for (unsigned int i = 0; i < msg_pose->pose.covariance.size(); i++)
+          msg_odom->twist.covariance[i] = msg_pose->pose.covariance[i]/time_diff;
+
+        pub_odom_.publish(msg_odom);
+      }
+      prev_nav_msg = msg_pose;
+
     }
 
-    if (pub_info_.getNumSubscribers() > 0)
+    
+  };
+  if (pub_info_.getNumSubscribers() > 0)
     {
       ptam_com::ptam_infoPtr msg_info(new ptam_com::ptam_info);
       double diff = header.stamp.toSec() - last_time;
@@ -363,16 +437,121 @@ void System::publishPoseAndInfo(const std_msgs::Header & header)
 
       msg_info->header = header;
       msg_info->fps = fps;
+      msg_info->wiggle = mpMapMaker->mdWiggleScale;
       msg_info->mapQuality = mpMap->bGood;
       msg_info->trackingQuality = mpTracker->getTrackingQuality();
       msg_info->trackerMessage = mpTracker->GetMessageForUser();
-      //      msg_info->mapViewerMessage = mpMapViewer->GetMessageForUser();
+      msg_info->mapViewerMessage = mpMapViewer->GetMessageForUser();
       msg_info->keyframes = mpMap->vpKeyFrames.size();
       pub_info_.publish(msg_info);
     }
-  };
 }
 
+pcl::PointCloud<pcl::PointXYZ>::Ptr System::getVisiblePointsFromPose(TooN::SE3<double> pose)
+{
+  pcl::PointCloud<pcl::PointXYZ>::Ptr visiblePoints(new pcl::PointCloud<pcl::PointXYZ>);
+    visiblePoints->header.frame_id = "world";
+    visiblePoints->height = 1;
+  #ifdef KF_REPROJ
+  //possibly visible Keyframes
+  vector<KeyFrame::Ptr> vpPVKeyFrames;
+  //for all keyframes
+  if(mpTracker->mTrackingQuality == mpTracker->GOOD){ //if tracking quality is not good, we use all KF
+    for(unsigned int k=0; k<mpMap->vpKeyFrames.size(); k++)
+    { //project best points
+      int foundKFPoints = 0;
+      if (!mpMap->vpKeyFrames.at(k)->vpPoints.size()) continue; //if this keyframe doesn't yet contain any points
+
+      for(int j=0; j<mpMap->vpKeyFrames.at(k)->iBestPointsCount; j++)
+      {
+        if(mpMap->vpKeyFrames.at(k)->apCurrentBestPoints[j]==NULL) continue;
+        MapPoint::Ptr p = (mpMap->vpKeyFrames.at(k)->apCurrentBestPoints[j]);
+        // Ensure that this map point has an associated TrackerData struct.
+        if(!p->pTData) p->pTData = new TrackerData(p);
+        TrackerData &TData = *p->pTData;
+
+        // Project according to current view, and if it's not in the image, skip.
+        TData.Project(pose, *mpCamera);
+        if(TData.bInImage)
+          foundKFPoints++;
+      };
+      //have at least some points of this keyframe been found?
+      if(foundKFPoints>1) vpPVKeyFrames.push_back(mpMap->vpKeyFrames.at(k));
+    };
+  };
+  //if we didn't find any Keyframes or tracking quality is bad
+  //we fall back to reprojecting all keyframes, thus all points
+  if (vpPVKeyFrames.size() < 1) {
+    for(unsigned int k=0; k<mpMap->vpKeyFrames.size(); k++){
+      vpPVKeyFrames.push_back(mpMap->vpKeyFrames.at(k));
+    }
+  }
+  for(unsigned int k=0; k<vpPVKeyFrames.size(); k++){//for all possibly visible keyframes
+    for(unsigned int i=0; i<vpPVKeyFrames.at(k)->vpPoints.size(); i++)// For all points in the visible keyframes..
+    {
+      MapPoint::Ptr p= (vpPVKeyFrames.at(k)->vpPoints.at(i));
+      if(p->bAlreadyProjected) continue;//check whether we already projected that point from another KF
+      p->bAlreadyProjected=true;
+      if(!p->pTData)
+        p->pTData = new TrackerData(p);// Ensure that this map point has an associated TrackerData struct.
+      TrackerData &TData = *p->pTData;
+      TData.Project(pose, *mpCamera);// Project according to current view, and if it's not in the image, skip.
+      if(!TData.bInImage)
+        continue;
+
+      TData.GetDerivsUnsafe(*mpCamera);// Calculate camera projection derivatives of this point.
+
+      // And check what the PatchFinder (included in TrackerData) makes of the mappoint in this view..
+
+      TData.nSearchLevel = TData.Finder.CalcSearchLevelAndWarpMatrix(TData.Point, pose, TData.m2CamDerivs);
+
+      if(TData.nSearchLevel == -1)
+        continue;   // a negative search pyramid level indicates an inappropriate warp for this view, so skip.
+
+      // Otherwise, this point is suitable to be searched in the current image! Add to the PVS.
+      TData.bSearched = false;
+      TData.bFound = false;
+      visiblePoints->points.push_back(pcl::PointXYZ(TData.Point->v3WorldPos[0], TData.Point->v3WorldPos[1], TData.Point->v3WorldPos[2]));
+    };
+  };
+
+  //reset alreadyprojected marker
+  for(unsigned int k=0; k<vpPVKeyFrames.size(); k++)
+    for(unsigned int i=0; i<vpPVKeyFrames.at(k)->vpPoints.size(); i++)
+      vpPVKeyFrames.at(k)->vpPoints.at(i)->bAlreadyProjected = false;
+#else
+
+  // For all points in the map..
+  for(unsigned int i=0; i<mpMap->vpPoints.size(); i++)
+  {
+    MapPoint &p= *(mpMap->vpPoints[i]);
+    // Ensure that this map point has an associated TrackerData struct.
+    if(!p.pTData) p.pTData = new TrackerData(&p);
+    TrackerData &TData = *p.pTData;
+
+    // Project according to current view, and if it's not in the image, skip.
+    TData.Project(pose, *mpCamera);
+    if(!TData.bInImage)
+      continue;
+
+    // Calculate camera projection derivatives of this point.
+    TData.GetDerivsUnsafe(*mpCamera);
+
+    // And check what the PatchFinder (included in TrackerData) makes of the mappoint in this view..
+    TData.nSearchLevel = TData.Finder.CalcSearchLevelAndWarpMatrix(TData.Point, pose, TData.m2CamDerivs);
+    if(TData.nSearchLevel == -1)
+      continue;   // a negative search pyramid level indicates an inappropriate warp for this view, so skip.
+
+    // Otherwise, this point is suitable to be searched in the current image! Add to the PVS.
+    TData.bSearched = false;
+    TData.bFound = false;
+    visiblePoints->points.push_back(pcl::PointXYZ(TData.Point->v3WorldPos[0], TData.Point->v3WorldPos[1], TData.Point->v3WorldPos[2]));
+  };
+  //slynen{ reprojection
+#endif
+    visiblePoints->width = visiblePoints->points.size();
+    return visiblePoints;
+}
 
 void System::publishPreviewImage(CVD::Image<CVD::byte> & img, const std_msgs::Header & header)
 {
@@ -437,6 +616,30 @@ void System::publishPreviewImage(CVD::Image<CVD::byte> & img, const std_msgs::He
     pub_preview_image_.publish(img_msg);
     cvReleaseImageHeader(&ocv_img);
   }
+    
+    pub_visibleCloud_.publish(getVisiblePointsFromPose(mpTracker->GetCurrentPose()));
+
+}
+
+bool System::posepointcloudservice(ptam_com::PosePointCloudRequest & req, ptam_com::PosePointCloudResponse & resp)
+{
+  TooN::Vector<3, double> T;
+  T[0] = req.pose.pose.position.x;
+  T[1] = req.pose.pose.position.y;
+  T[2] = req.pose.pose.position.z;
+
+  tf::Quaternion currentQuat;
+  tf::quaternionMsgToTF(req.pose.pose.orientation, currentQuat);
+  tf::Matrix3x3 m(currentQuat);
+
+  TooN::Matrix<3,3, double> R(TooN::Data(m[0][0],  m[0][1],  m[0][2], 
+                                          m[1][0],  m[1][1],  m[1][2], 
+                                          m[2][0],  m[2][1],  m[2][2] ));  
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr pointCloud = getVisiblePointsFromPose(TooN::SE3<double>(TooN::SO3<double>(R),-R*T));
+  pcl::toROSMsg(*pointCloud, resp.pointCloud);
+
+  return true;
 }
 
 //Weiss{
@@ -450,6 +653,7 @@ bool System::pointcloudservice(ptam_com::PointCloudRequest & req, ptam_com::Poin
   resp.pointcloud.header.stamp = ros::Time::now();
   resp.pointcloud.height = 1;
   resp.pointcloud.header.frame_id = "/world";
+  if(mpMap!=NULL)
   if(mpMap->bGood)
   {
     resp.pointcloud.width = mpMap->vpPoints.size();
@@ -478,7 +682,7 @@ bool System::pointcloudservice(ptam_com::PointCloudRequest & req, ptam_com::Poin
     resp.pointcloud.fields[5].offset = 5*sizeof(uint32_t);
     resp.pointcloud.fields[5].datatype = sensor_msgs::PointField::INT32;
     resp.pointcloud.fields[5].count = 1;
-
+    
     resp.pointcloud.point_step = dimension*sizeof(uint32_t);
     resp.pointcloud.row_step = resp.pointcloud.point_step * resp.pointcloud.width;
     resp.pointcloud.data.resize(resp.pointcloud.row_step * resp.pointcloud.height);
@@ -487,6 +691,7 @@ bool System::pointcloudservice(ptam_com::PointCloudRequest & req, ptam_com::Poin
 
     unsigned char* dat = &(resp.pointcloud.data[0]);
     unsigned int n=0;
+    
     for(std::vector<MapPoint::Ptr>::iterator it=mpMap->vpPoints.begin(); it!=mpMap->vpPoints.end(); ++it,++n)
     {
       if(n>resp.pointcloud.width-1) break;
@@ -502,8 +707,10 @@ bool System::pointcloudservice(ptam_com::PointCloudRequest & req, ptam_com::Poin
       memcpy(dat+4*sizeof(uint32_t),&lvl,sizeof(uint32_t));
       memcpy(dat+5*sizeof(uint32_t),&KF,sizeof(uint32_t));
       dat+=resp.pointcloud.point_step;
+
     }
   }
+
   return true;
 }
 

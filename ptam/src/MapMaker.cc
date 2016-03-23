@@ -16,6 +16,7 @@
 #include <gvars3/instances.h>
 #include <fstream>
 #include <algorithm>
+#include <cmath>
 
 #include <ptam/Params.h>
 
@@ -247,9 +248,12 @@ bool MapMaker::InitFromStereo(KeyFrame::Ptr kF,
   //Weiss{
   //mdWiggleScale = 0.1;
   const FixParams& pPars = PtamParameters::fixparams();
-  mdWiggleScale=pPars.WiggleScale;
+  //mdWiggleScale=pPars.WiggleScale;
   //mdWiggleScale = *mgvdWiggleScale; // Cache this for the new map.
   //}
+  mdWiggleScale = sqrt((odom_first.pose.pose.position.x - odom_second.pose.pose.position.x)*(odom_first.pose.pose.position.x - odom_second.pose.pose.position.x)
+                    +  (odom_first.pose.pose.position.y - odom_second.pose.pose.position.y)*(odom_first.pose.pose.position.y - odom_second.pose.pose.position.y)
+                    +  (odom_first.pose.pose.position.z - odom_second.pose.pose.position.z)*(odom_first.pose.pose.position.z - odom_second.pose.pose.position.z));
 
   mCamera.SetImageSize(kF->aLevels[0].im.size());
 

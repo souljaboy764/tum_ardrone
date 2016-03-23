@@ -31,11 +31,11 @@ using namespace GVars3;
 // The constructor mostly sets up interal reference variables
 // to the other classes..
 Tracker::Tracker(ImageRef irVideoSize, const ATANCamera &c, Map &m, MapMaker &mm) : 
-                                  mMap(m),
-                                  mMapMaker(mm),
-                                  mCamera(c),
-                                  mRelocaliser(mMap, mCamera),
-                                  mirSize(irVideoSize)
+				                          mMap(m),
+				                          mMapMaker(mm),
+				                          mCamera(c),
+				                          mRelocaliser(mMap, mCamera),
+				                          mirSize(irVideoSize)
 {
   mCurrentKF.reset(new KeyFrame);
   mCurrentKF->bFixed = false;
@@ -176,14 +176,14 @@ void Tracker::TrackFrame(Image<CVD::byte> &imFrame, bool bDraw)
         if(mTrackingQuality == BAD)   mMessageForUser << "bad.";
         mMessageForUser << " Found:";
         for(int i=0; i<LEVELS; i++) mMessageForUser << " " << manMeasFound[i] << "/" << manMeasAttempted[i];
-        //      mMessageForUser << " Found " << mnMeasFound << " of " << mnMeasAttempted <<". (";
+        //	    mMessageForUser << " Found " << mnMeasFound << " of " << mnMeasAttempted <<". (";
         mMessageForUser << " Map: " << mMap.vpPoints.size() << "P, " << mMap.vpKeyFrames.size() << "KF";
       }
 
       // Heuristics to check if a key-frame should be added to the map:
       if(mTrackingQuality == GOOD &&
           mMapMaker.NeedNewKeyFrame(mCurrentKF) &&
-          //          mnFrame - mnLastKeyFrameDropped > 5  &&
+          //					mnFrame - mnLastKeyFrameDropped > 5  &&
           mMapMaker.QueueSize() < 5)
       {
         mMessageForUser << " Adding key-frame.";
@@ -244,7 +244,7 @@ void Tracker::TrackFrame(Image<CVD::byte> &imFrame, bool bDraw)
         }
         delete pSBIsecond;
 
-        if(k>0) // otherwise "if (mediandist>pPars.AutoInitPixel)" segfaults...
+        if(k>0)	// otherwise "if (mediandist>pPars.AutoInitPixel)" segfaults...
         {
           std::vector<double>::iterator first = mediandistvec.begin();
           std::vector<double>::iterator last = mediandistvec.end();
@@ -395,7 +395,7 @@ void Tracker::GUICommandHandler(string sCommand, string sParams)  // Called by t
       ROS_WARN_STREAM("Forcing map reset because of user input! Autoreset set to " << mAutoreset);
       Reset();
     }
-    else if(sParams == "a") // autoreset test button
+    else if(sParams == "a")	// autoreset test button
     {
       mAutoreset=true;
       ROS_WARN_STREAM("Forcing map reset because of user input! Autoreset set to " << mAutoreset);
@@ -490,9 +490,9 @@ void Tracker::TrackForInitialMap()
 
           for(unsigned int ip=0;ip<mMap.vpPoints.size();ip++)
           {
-            //            if(mMap.vpPoints[ip]->pPatchSourceKF==mMap.vpKeyFrames[0])
+            //						if(mMap.vpPoints[ip]->pPatchSourceKF==mMap.vpKeyFrames[0])
             medianvec1.push_back((mMap.vpKeyFrames[0]->se3CfromW*mMap.vpPoints[ip]->v3WorldPos)[2]);
-            //            else //if(mMap.vpPoints[ip]->pPatchSourceKF==mMap.vpKeyFrames[1])
+            //						else //if(mMap.vpPoints[ip]->pPatchSourceKF==mMap.vpKeyFrames[1])
             medianvec2.push_back((mMap.vpKeyFrames[1]->se3CfromW*mMap.vpPoints[ip]->v3WorldPos)[2]);
           }
           std::vector<double>::iterator first = medianvec1.begin();
@@ -641,9 +641,85 @@ int Tracker::TrailTracking_Advance()
 }
 
 vector<TrackerData> Tracker::reTrack(SE3<> pose)
-{ 
+{
+  // The Potentially-Visible-Set (PVS) is split into pyramid levels.
+/*  vector<TrackerData*> avPVS[LEVELS];
+  for(int i=0; i<LEVELS; i++)
+    avPVS[i].reserve(500);
+
+  //slynen{ reprojection keyfeatures
+#ifdef KF_REPROJ
+  //possibly visible Keyframes
+  vector<KeyFrame::Ptr> vpPVKeyFrames;
+  //for all keyframes
+  if(mTrackingQuality == GOOD){ //if tracking quality is not good, we use all KF
+    for(unsigned int k=0; k<mMap.vpKeyFrames.size(); k++)
+    { //project best points
+      int foundKFPoints = 0;
+      if (!mMap.vpKeyFrames.at(k)->vpPoints.size()) continue; //if this keyframe doesn't yet contain any points
+
+      for(unsigned int j=0; j<mMap.vpKeyFrames.at(k)->iBestPointsCount; j++)
+      {
+        if(mMap.vpKeyFrames.at(k)->apCurrentBestPoints[j]==NULL) continue;
+        MapPoint::Ptr p = (mMap.vpKeyFrames.at(k)->apCurrentBestPoints[j]);
+        // Ensure that this map point has an associated TrackerData struct.
+        if(!p->pTData) p->pTData = new TrackerData(p);
+        TrackerData &TData = *p->pTData;
+
+        // Project according to current view, and if it's not in the image, skip.
+        TData.Project(pose, mCamera);
+        if(TData.bInImage)
+          foundKFPoints++;
+      };
+      //have at least some points of this keyframe been found?
+      if(foundKFPoints>1) vpPVKeyFrames.push_back(mMap.vpKeyFrames.at(k));
+    };
+  };
+  //if we didn't find any Keyframes or tracking quality is bad
+  //we fall back to reprojecting all keyframes, thus all points
+  if (vpPVKeyFrames.size() < 1) {
+    for(unsigned int k=0; k<mMap.vpKeyFrames.size(); k++){
+      vpPVKeyFrames.push_back(mMap.vpKeyFrames.at(k));
+    }
+  }
+  for(unsigned int k=0; k<vpPVKeyFrames.size(); k++){//for all possibly visible keyframes
+    for(unsigned int i=0; i<vpPVKeyFrames.at(k)->vpPoints.size(); i++)// For all points in the visible keyframes..
+    {
+      MapPoint::Ptr p= (vpPVKeyFrames.at(k)->vpPoints.at(i));
+      if(p->bAlreadyProjected) continue;//check whether we already projected that point from another KF
+      p->bAlreadyProjected=true;
+      if(!p->pTData)
+        p->pTData = new TrackerData(p);// Ensure that this map point has an associated TrackerData struct.
+      TrackerData &TData = *p->pTData;
+      TData.Project(pose, mCamera);// Project according to current view, and if it's not in the image, skip.
+      if(!TData.bInImage)
+        continue;
+
+      TData.GetDerivsUnsafe(mCamera);// Calculate camera projection derivatives of this point.
+
+      // And check what the PatchFinder (included in TrackerData) makes of the mappoint in this view..
+
+      TData.nSearchLevel = TData.Finder.CalcSearchLevelAndWarpMatrix(TData.Point, pose, TData.m2CamDerivs);
+
+      if(TData.nSearchLevel == -1)
+        continue;   // a negative search pyramid level indicates an inappropriate warp for this view, so skip.
+
+      // Otherwise, this point is suitable to be searched in the current image! Add to the PVS.
+      TData.bSearched = false;
+      TData.bFound = false;
+      avPVS[TData.nSearchLevel].push_back(&TData);
+    };
+  };
+
+  //reset alreadyprojected marker
+  for(unsigned int k=0; k<vpPVKeyFrames.size(); k++)
+    for(unsigned int i=0; i<vpPVKeyFrames.at(k)->vpPoints.size(); i++)
+      vpPVKeyFrames.at(k)->vpPoints.at(i)->bAlreadyProjected = false;
+#else
+*/
+  // For all points in the map..
   vector<TrackerData> result;
-  /*for(unsigned int i=0; i<mMap.vpPoints.size(); i++)
+  for(unsigned int i=0; i<mMap.vpPoints.size(); i++)
   {
     MapPoint &p= *(mMap.vpPoints[i]);
     // Ensure that this map point has an associated TrackerData struct.
@@ -668,7 +744,7 @@ vector<TrackerData> Tracker::reTrack(SE3<> pose)
     TData.bFound = false;
     //avPVS[TData.nSearchLevel].push_back(&TData);
     result.push_back(TData);
-  };*/
+  };
 
 /*
     for(vector<TrackerData*>::reverse_iterator it = vIterationSet.rbegin();
@@ -936,11 +1012,11 @@ void Tracker::TrackMap()
   //for all keyframes
   if(mTrackingQuality == GOOD){ //if tracking quality is not good, we use all KF
     for(unsigned int k=0; k<mMap.vpKeyFrames.size(); k++)
-    { //project best points
+    {	//project best points
       int foundKFPoints = 0;
       if (!mMap.vpKeyFrames.at(k)->vpPoints.size()) continue; //if this keyframe doesn't yet contain any points
 
-      for(int j=0; j<mMap.vpKeyFrames.at(k)->iBestPointsCount; j++)
+      for(unsigned int j=0; j<mMap.vpKeyFrames.at(k)->iBestPointsCount; j++)
       {
         if(mMap.vpKeyFrames.at(k)->apCurrentBestPoints[j]==NULL) continue;
         MapPoint::Ptr p = (mMap.vpKeyFrames.at(k)->apCurrentBestPoints[j]);
@@ -1033,7 +1109,7 @@ void Tracker::TrackMap()
   // First, randomly shuffle the individual levels of the PVS.
   for(int i=0; i<LEVELS; i++)
     random_shuffle(avPVS[i].begin(), avPVS[i].end());
-  
+
   // The next two data structs contain the list of points which will next
   // be searched for in the image, and then used in pose update.
   vector<TrackerData*> vNextToSearch;
@@ -1434,98 +1510,98 @@ int Tracker::SearchForPoints(vector<TrackerData*> &vTD, int nRange, int nSubPixI
 //by the Tukey MEstimator.
 Vector<6> Tracker::CalcPoseUpdate(vector<TrackerData*> vTD, double dOverrideSigma, bool bMarkOutliers)
 {
-  // Which M-estimator are we using?
-  int nEstimator = 0;
-  //Weiss{
-  //static std::string gvsEstimator = "Tukey";
-  const FixParams& pPars = PtamParameters::fixparams();
-  static std::string gvsEstimator = pPars.TrackerMEstimator;
-  //}
-  if(gvsEstimator == "Tukey")
-    nEstimator = 0;
-  else if(gvsEstimator == "Cauchy")
-    nEstimator = 1;
-  else if(gvsEstimator == "Huber")
-    nEstimator = 2;
-  else
-  {
-    cout << "Invalid TrackerMEstimator, choices are Tukey, Cauchy, Huber" << endl;
-    nEstimator = 0;
-    gvsEstimator = "Tukey";
-  };
+	// Which M-estimator are we using?
+	int nEstimator = 0;
+	//Weiss{
+	//static std::string gvsEstimator = "Tukey";
+	const FixParams& pPars = PtamParameters::fixparams();
+	static std::string gvsEstimator = pPars.TrackerMEstimator;
+	//}
+	if(gvsEstimator == "Tukey")
+		nEstimator = 0;
+	else if(gvsEstimator == "Cauchy")
+		nEstimator = 1;
+	else if(gvsEstimator == "Huber")
+		nEstimator = 2;
+	else
+	{
+		cout << "Invalid TrackerMEstimator, choices are Tukey, Cauchy, Huber" << endl;
+		nEstimator = 0;
+		gvsEstimator = "Tukey";
+	};
 
-  // Find the covariance-scaled reprojection error for each measurement.
-  // Also, store the square of these quantities for M-Estimator sigma squared estimation.
-  vector<double> vdErrorSquared;
-  for(unsigned int f=0; f<vTD.size(); f++)
-  {
-    TrackerData &TD = *vTD[f];
-    if(!TD.bFound)
-      continue;
-    TD.v2Error_CovScaled = TD.dSqrtInvNoise* (TD.v2Found - TD.v2Image);
-    vdErrorSquared.push_back(static_cast<double>(TD.v2Error_CovScaled * TD.v2Error_CovScaled));
-  };
+	// Find the covariance-scaled reprojection error for each measurement.
+	// Also, store the square of these quantities for M-Estimator sigma squared estimation.
+	vector<double> vdErrorSquared;
+	for(unsigned int f=0; f<vTD.size(); f++)
+	{
+		TrackerData &TD = *vTD[f];
+		if(!TD.bFound)
+			continue;
+		TD.v2Error_CovScaled = TD.dSqrtInvNoise* (TD.v2Found - TD.v2Image);
+		vdErrorSquared.push_back(static_cast<double>(TD.v2Error_CovScaled * TD.v2Error_CovScaled));
+	};
 
-  // No valid measurements? Return null update.
-  if(vdErrorSquared.size() == 0)
-    return makeVector( 0,0,0,0,0,0);
+	// No valid measurements? Return null update.
+	if(vdErrorSquared.size() == 0)
+		return makeVector( 0,0,0,0,0,0);
 
-  // What is the distribution of errors?
-  double dSigmaSquared;
-  if(dOverrideSigma > 0)
-    dSigmaSquared = dOverrideSigma; // Bit of a waste having stored the vector of square errors in this case!
-  else
-  {
-    if (nEstimator == 0)
-      dSigmaSquared = Tukey::FindSigmaSquared(vdErrorSquared);
-    else if(nEstimator == 1)
-      dSigmaSquared = Cauchy::FindSigmaSquared(vdErrorSquared);
-    else
-      dSigmaSquared = Huber::FindSigmaSquared(vdErrorSquared);
-  }
+	// What is the distribution of errors?
+	double dSigmaSquared;
+	if(dOverrideSigma > 0)
+		dSigmaSquared = dOverrideSigma; // Bit of a waste having stored the vector of square errors in this case!
+	else
+	{
+		if (nEstimator == 0)
+			dSigmaSquared = Tukey::FindSigmaSquared(vdErrorSquared);
+		else if(nEstimator == 1)
+			dSigmaSquared = Cauchy::FindSigmaSquared(vdErrorSquared);
+		else
+			dSigmaSquared = Huber::FindSigmaSquared(vdErrorSquared);
+	}
 
-  // The TooN WLSCholesky class handles reweighted least squares.
-  // It just needs errors and jacobians.
-  WLS<6> wls;
-  wls.add_prior(100.0); // Stabilising prior
-  for(unsigned int f=0; f<vTD.size(); f++)
-  {
-    TrackerData &TD = *vTD[f];
-    if(!TD.bFound)
-      continue;
-    Vector<2> &v2 = TD.v2Error_CovScaled;
-    double dErrorSq = v2 * v2;
-    double dWeight;
+	// The TooN WLSCholesky class handles reweighted least squares.
+	// It just needs errors and jacobians.
+	WLS<6> wls;
+	wls.add_prior(100.0); // Stabilising prior
+	for(unsigned int f=0; f<vTD.size(); f++)
+	{
+		TrackerData &TD = *vTD[f];
+		if(!TD.bFound)
+			continue;
+		Vector<2> &v2 = TD.v2Error_CovScaled;
+		double dErrorSq = v2 * v2;
+		double dWeight;
 
-    if(nEstimator == 0)
-      dWeight= Tukey::Weight(dErrorSq, dSigmaSquared);
-    else if(nEstimator == 1)
-      dWeight= Cauchy::Weight(dErrorSq, dSigmaSquared);
-    else
-      dWeight= Huber::Weight(dErrorSq, dSigmaSquared);
+		if(nEstimator == 0)
+			dWeight= Tukey::Weight(dErrorSq, dSigmaSquared);
+		else if(nEstimator == 1)
+			dWeight= Cauchy::Weight(dErrorSq, dSigmaSquared);
+		else
+			dWeight= Huber::Weight(dErrorSq, dSigmaSquared);
 
-    // Inlier/outlier accounting, only really works for cut-off estimators such as Tukey.
-    if(dWeight == 0.0)
-    {
-      if(bMarkOutliers)
-        TD.Point->nMEstimatorOutlierCount++;
-      continue;
-    }
-    else
-      if(bMarkOutliers)
-        TD.Point->nMEstimatorInlierCount++;
+		// Inlier/outlier accounting, only really works for cut-off estimators such as Tukey.
+		if(dWeight == 0.0)
+		{
+			if(bMarkOutliers)
+				TD.Point->nMEstimatorOutlierCount++;
+			continue;
+		}
+		else
+			if(bMarkOutliers)
+				TD.Point->nMEstimatorInlierCount++;
 
-    Matrix<2,6> &m26Jac = TD.m26Jacobian;
-    wls.add_mJ(v2[0], TD.dSqrtInvNoise * m26Jac[0], dWeight); // These two lines are currently
-    wls.add_mJ(v2[1], TD.dSqrtInvNoise * m26Jac[1], dWeight); // the slowest bit of poseits
-  }
+		Matrix<2,6> &m26Jac = TD.m26Jacobian;
+		wls.add_mJ(v2[0], TD.dSqrtInvNoise * m26Jac[0], dWeight); // These two lines are currently
+		wls.add_mJ(v2[1], TD.dSqrtInvNoise * m26Jac[1], dWeight); // the slowest bit of poseits
+	}
 
-  wls.compute();
-  //Weiss{
-  if (bMarkOutliers)  //only true for last iteration, see code above... (iter==9)
-    mmCovariances=TooN::SVD<6>(wls.get_C_inv()).get_pinv();
-  //}
-  return wls.get_mu();
+	wls.compute();
+	//Weiss{
+	if (bMarkOutliers)	//only true for last iteration, see code above... (iter==9)
+		mmCovariances=TooN::SVD<6>(wls.get_C_inv()).get_pinv();
+	//}
+	return wls.get_mu();
 }
 
 
@@ -1551,7 +1627,7 @@ void Tracker::ApplyMotionModel()
     //                v6Velocity[0] = 0.0;
     //                v6Velocity[1] = 0.0;
   }
-  //  std::cout<<"motion:"<<std::endl<<v6Velocity.slice<3,3>()<<std::endl
+  //	std::cout<<"motion:"<<std::endl<<v6Velocity.slice<3,3>()<<std::endl
   //            <<(mso3CurrentImu.inverse()*mso3LastImu).ln()<<std::endl
   //            <<(mso3CurrentImu*mso3LastImu.inverse()).ln()<<std::endl
   //            <<(mso3LastImu.inverse()*mso3CurrentImu).ln()<<std::endl

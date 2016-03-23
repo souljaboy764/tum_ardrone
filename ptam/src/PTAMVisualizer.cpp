@@ -3,15 +3,18 @@
 #include <ptam_com/KeyFrame_srv.h>
 #include <ptam_com/KeyFrame_msg.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <ptam/PTAMVisualizerParamsConfig.h>
 #include <dynamic_reconfigure/server.h>
 #include <visualization_msgs/Marker.h>
 #include <ptam/AxesArray.h>
 
+#include <tf/transform_datatypes.h>
+
 #include <unistd.h>
 #include <sys/types.h>
 #include <pwd.h>
-
+const long double PI = 3.141592653589793238L;
 
 typedef dynamic_reconfigure::Server<ptam::PTAMVisualizerParamsConfig> ReconfigureServer;
 ReconfigureServer *reconfServer_;
@@ -28,7 +31,8 @@ struct passwd *pw;
 int KFFlags_;
 unsigned int lastKFid;
 visualization_msgs::Marker path;
-ros::Publisher pub_path;
+visualization_msgs::Marker kfPath;
+ros::Publisher pub_path, pub_pose, pub_next_pose;
 AxesArray tripods;
 AxesArray tripodshistory;
 
@@ -46,7 +50,10 @@ int main(int argc, char **argv)
   ros::Publisher pub_cloud = n.advertise<sensor_msgs::PointCloud2> ("vslam/pc2", 1);
   ros::Publisher pub_kfs = n.advertise<ptam_com::KeyFrame_msg> ("vslam/kfs",1);
   ros::Publisher pub_marker = n.advertise<visualization_msgs::MarkerArray>("vslam/kf_visualization_array", 1);
+  ros::Publisher pub_kfPath = n.advertise<visualization_msgs::Marker>("vslam/pose_visualization_array", 1);
   pub_path = n.advertise<visualization_msgs::Marker>("vslam/path_visualization", 1);
+  pub_pose = n.advertise<geometry_msgs::PoseStamped>("vslam/pose_visualization", 1);
+  pub_next_pose = n.advertise<geometry_msgs::PoseStamped>("vslam/pose_next_visualization", 1);
 
   ros::Subscriber sub_path = n.subscribe("vslam/pose",1,&pathCallback);
 
@@ -76,8 +83,20 @@ int main(int argc, char **argv)
   path.color.r=1.0;
   path.color.g=1.0;
   path.color.a=1.0;
-  path.scale.x=0.01;
+  path.scale.x=0.1;
   path.pose.orientation.w=1.0;
+
+  kfPath.id=0;
+  kfPath.lifetime=ros::Duration(1);
+  kfPath.header.frame_id = "/world";
+  kfPath.header.stamp = ros::Time::now();
+  kfPath.ns = "kfPath_publisher";
+  kfPath.action = visualization_msgs::Marker::ADD;
+  kfPath.type = visualization_msgs::Marker::LINE_STRIP;
+  kfPath.color.g=1.0;
+  kfPath.color.a=1.0;
+  kfPath.scale.x=0.01;
+  kfPath.pose.orientation.w=1.0;
 
   while(ros::ok())
   {
@@ -109,6 +128,10 @@ int main(int argc, char **argv)
         {
           tripodshistory.addAxes(pos,att,srv_kfs.response.KFids[i]);
           lastKFid=srv_kfs.response.KFids[i]+1;
+          TooN::Vector<3> center = tripods.getCenter(pos,att);
+          geometry_msgs::Point p;
+          memcpy(&(p.x),&(center[0]),sizeof(double)*3);
+          kfPath.points.push_back(p);
         }
       }
     }
@@ -118,6 +141,7 @@ int main(int argc, char **argv)
       tripods.clearAxes();
       tripodshistory.clearAxes();
       path.points.clear();
+      kfPath.points.clear();
       pathidx=0;
     }
 
@@ -134,7 +158,10 @@ int main(int argc, char **argv)
     }
 
     if(show_path_)
+    {
       pub_path.publish(path);
+      pub_kfPath.publish(kfPath);
+    }
 
     usleep(1e6);
     ros::spinOnce();
@@ -155,6 +182,21 @@ void pathCallback(const geometry_msgs::PoseWithCovarianceStampedConstPtr & msg)
   geometry_msgs::Point p;
   memcpy(&(p.x),&(center[0]),sizeof(double)*3);
   path.points.push_back(p);
+
+  geometry_msgs::PoseStamped ps;
+  ps.header.frame_id="world";
+  ps.pose.position = p;
+  geometry_msgs::Quaternion Q = msg->pose.pose.orientation;
+  tf::Quaternion q(Q.w,Q.x,Q.y,Q.z);
+  tf::Matrix3x3 m(q);
+  double roll, pitch, yaw;
+  m.getRPY(roll, pitch, yaw);
+
+  ps.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(roll,pitch + PI/2.0,yaw);
+  pub_pose.publish(ps);
+
+
+  //pub_next_pose
   while(path.points.size()>path_length_)
     path.points.erase(path.points.begin());
 
@@ -244,11 +286,11 @@ void saveMap(std::string prefix)
 
 void Config(ptam::PTAMVisualizerParamsConfig& config, uint32_t level)
 {
-  show_pc_ = config.ShowPC;
-  show_kfs_ = config.ShowKFs;
-  show_all_kfs_ = config.ShowAllKFs;
+  show_pc_ = true;//config.ShowPC;
+  show_kfs_ = true;//config.ShowKFs;
+  show_all_kfs_ = true;//config.ShowAllKFs;
   kf_lifetime_ = config.KFLifetime;
-  show_path_ = config.ShowPath;
+  show_path_ = true;//config.ShowPath;
   KFFlags_ = config.KFFlags;
   path_length_ = config.PathLength;
   if(config.ExportPC)

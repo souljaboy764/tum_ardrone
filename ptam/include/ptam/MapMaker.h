@@ -25,7 +25,7 @@
 #include <sstream>
 #include <boost/shared_ptr.hpp>
 #include <ptam/OctomapInterface.h>
-
+#include <nav_msgs/Odometry.h>
 
 // Each MapPoint has an associated MapMakerData class
 // Where the mapmaker can store extra information
@@ -42,6 +42,7 @@ struct MapMakerData
 class MapMaker : protected CVD::Thread
 {
 public:
+  nav_msgs::Odometry odom_first, odom_second;
   MapMaker(Map &m, const ATANCamera &cam, ros::NodeHandle& nh);
   ~MapMaker();
 
@@ -70,6 +71,10 @@ public:
   void ApplyGlobalTransformationToMap(SE3<> se3NewFromOld);
   KeyFrame::Ptr ClosestKeyFrame(KeyFrame::Ptr k);
   std::vector<KeyFrame::Ptr> NClosestKeyFrames(KeyFrame::Ptr k, unsigned int N);
+
+  double mdWiggleScale;  // Metric distance between the first two KeyFrames (copied from GVar)
+  // This sets the scale of the map
+  //GVars3::gvar3<double> mgvdWiggleScale;   // GVar for above
   //}
 
 protected:
@@ -126,9 +131,7 @@ protected:
   std::vector<std::pair<KeyFrame::Ptr, boost::shared_ptr<MapPoint> > > mvFailureQueue; // Queue of failed observations to re-find
   std::queue<boost::shared_ptr<MapPoint> > mqNewQueue;   // Queue of newly-made map points to re-find in other KeyFrames
 
-  double mdWiggleScale;  // Metric distance between the first two KeyFrames (copied from GVar)
-  // This sets the scale of the map
-  //GVars3::gvar3<double> mgvdWiggleScale;   // GVar for above
+  
   double mdWiggleScaleDepthNormalized;  // The above normalized against scene depth, 
   // this controls keyframe separation
 

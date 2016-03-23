@@ -7,6 +7,8 @@
 #include <fstream>
 #include <stdlib.h>
 
+#include <cv_bridge/cv_bridge.h>
+
 #include <cvd/image.h>
 #include <cvd/byte.h>
 #include <cvd/rgb.h>
@@ -56,13 +58,11 @@ int main(int argc, char** argv)
 void CameraCalibrator::imageCallback(const sensor_msgs::ImageConstPtr & img)
 {
 
-  ROS_ASSERT(img->encoding == sensor_msgs::image_encodings::MONO8 && img->step == img->width);
-
+  cv_bridge::CvImagePtr cv_ptr = cv_bridge::toCvCopy(img, sensor_msgs::image_encodings::MONO8);
   CVD::ImageRef size(img->width, img->height);
   mCurrentImage.resize(size);
 
-  CVD::BasicImage<CVD::byte> img_tmp((CVD::byte *)&img->data[0], size);
-  CVD::copy(img_tmp, mCurrentImage);
+  memcpy(mCurrentImage.data(),cv_ptr->image.data,img->width * img->height);
   mNewImage = true;
 }
 
